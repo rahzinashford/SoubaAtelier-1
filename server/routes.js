@@ -571,8 +571,8 @@ export async function registerRoutes(httpServer, app) {
 
       const token = signToken({
         id: user.id,
-        email: user.email,
-        role: user.role
+        role: user.role,
+        tokenVersion: user.tokenVersion
       });
 
       const { passwordHash, ...userWithoutPassword } = user;
@@ -986,11 +986,11 @@ export async function registerRoutes(httpServer, app) {
   app.post("/api/admin/users/:id/revoke-sessions", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { id } = req.params;
-      const existingUser = await storage.getUser(id);
-      if (!existingUser) {
+      const user = await storage.revokeUserSessions(id);
+      if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      await createAuditLog(storage, req, 'USER_SESSIONS_REVOKED', 'user', id, {});
+      await createAuditLog(storage, req, 'USER_SESSIONS_REVOKED', 'user', id, { tokenVersion: user.tokenVersion });
       res.json({ success: true, message: "Sessions revoked" });
     } catch (error) {
       res.status(500).json({ message: "Failed to revoke sessions" });

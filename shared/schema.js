@@ -12,6 +12,7 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("passwordHash").notNull(),
   role: text("role").notNull().default("USER"),
+  tokenVersion: integer("tokenVersion").notNull().default(0),
   phone: text("phone"),
   active: boolean("active").notNull().default(true),
   lastLogin: timestamp("lastLogin"),
@@ -362,4 +363,3 @@ export const passwordResets = pgTable("password_resets", {
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
-

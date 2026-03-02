@@ -1,0 +1,2 @@
+ALTER TABLE "users"
+ADD COLUMN IF NOT EXISTS "tokenVersion" integer NOT NULL DEFAULT 0;

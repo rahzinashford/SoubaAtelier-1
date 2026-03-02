@@ -1,9 +1,10 @@
+import { storage } from "../storage.js";
 import { verifyToken } from "../utils/jwt.js";
 
 /**
  * Verifies JWT and attaches user to req.user
  */
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
 
@@ -18,11 +19,24 @@ export function requireAuth(req, res, next) {
 
     const decoded = verifyToken(token);
 
-    if (!decoded || !decoded.id) {
+    if (!decoded || !decoded.id || typeof decoded.tokenVersion !== "number") {
       return res.status(401).json({ error: "Invalid token" });
     }
 
-    req.user = decoded;
+    const user = await storage.getUserAuthSnapshot(decoded.id);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (decoded.tokenVersion !== user.tokenVersion) {
+      return res.status(401).json({ error: "Session invalidated" });
+    }
+
+    req.user = {
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    };
     next();
   } catch (err) {
     return res.status(401).json({ error: "Unauthorized" });

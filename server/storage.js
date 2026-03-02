@@ -12,6 +12,16 @@ export class DatabaseStorage {
     return user || undefined;
   }
 
+  async getUserAuthSnapshot(id) {
+    const [user] = await db.select({
+      id: users.id,
+      role: users.role,
+      tokenVersion: users.tokenVersion,
+      active: users.active,
+    }).from(users).where(eq(users.id, id));
+    return user || undefined;
+  }
+
   async getUserByName(name) {
     const [user] = await db.select().from(users).where(eq(users.name, name));
     return user || undefined;
@@ -246,7 +256,8 @@ export class DatabaseStorage {
   async updateUserPassword(id, newPasswordHash) {
     const [user] = await db.update(users).set({ 
       passwordHash: newPasswordHash,
-      lastPasswordChange: new Date()
+      lastPasswordChange: new Date(),
+      tokenVersion: sql`${users.tokenVersion} + 1`,
     }).where(eq(users.id, id)).returning();
     return user || undefined;
   }
@@ -455,12 +466,22 @@ async clearPasswordResetToken(userId) {
   }
 
   async updateUserRole(id, role) {
-    const [user] = await db.update(users).set({ role }).where(eq(users.id, id)).returning();
+    const [user] = await db.update(users).set({
+      role,
+      tokenVersion: sql`${users.tokenVersion} + 1`,
+    }).where(eq(users.id, id)).returning();
     return user || undefined;
   }
 
   async updateUserActive(id, active) {
     const [user] = await db.update(users).set({ active }).where(eq(users.id, id)).returning();
+    return user || undefined;
+  }
+
+  async revokeUserSessions(id) {
+    const [user] = await db.update(users).set({
+      tokenVersion: sql`${users.tokenVersion} + 1`,
+    }).where(eq(users.id, id)).returning();
     return user || undefined;
   }
 
