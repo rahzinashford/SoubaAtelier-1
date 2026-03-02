@@ -14,29 +14,83 @@ import { cartItems, carts, orderItems, orders, products } from "../shared/schema
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 const uploadDir = path.join(process.cwd(), "uploads", "products");
+const uploadRootDir = path.join(process.cwd(), "uploads");
+
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+  fs.mkdirSync(uploadDir, { recursive: true, mode: 0o750 });
+}
+
+try {
+  fs.chmodSync(uploadRootDir, 0o750);
+  fs.chmodSync(uploadDir, 0o750);
+} catch (error) {
+  console.error("Failed to harden upload directory permissions", error);
+}
+
+const allowedImageMimes = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+function createBadRequestError(message) {
+  const error = new Error(message);
+  error.status = 400;
+  error.publicMessage = message;
+  return error;
+}
+
+function detectImageSignature(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 && buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a) return "image/png";
+  if (buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
+function isUploadPathSafe(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  const resolvedUploadDir = path.resolve(uploadDir);
+  return resolvedPath.startsWith(resolvedUploadDir + path.sep);
+}
+
+function collectProductImagePaths(product) {
+  const rawImages = [];
+  if (typeof product?.imageUrl === "string") rawImages.push(product.imageUrl);
+  if (Array.isArray(product?.images)) rawImages.push(...product.images);
+
+  return [...new Set(rawImages)]
+    .filter((url) => typeof url === "string" && url.startsWith("/uploads/products/"))
+    .map((url) => path.join(uploadDir, path.basename(url)));
 }
 
 const storage_multer = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: function (_req, _file, cb) {
     cb(null, uploadDir);
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  filename: function (_req, file, cb) {
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${file.fieldname}-${uniqueSuffix}${extension}`);
   }
 });
 
 const upload = multer({
   storage: storage_multer,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image files are allowed"));
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    const expectedMime = allowedImageMimes[extension];
+
+    if (!expectedMime) {
+      return cb(createBadRequestError("Only .jpg, .jpeg, .png, and .webp files are allowed"));
     }
+
+    if (file.mimetype !== expectedMime) {
+      return cb(createBadRequestError("File extension and MIME type must match"));
+    }
+
+    cb(null, true);
   }
 });
 
@@ -60,13 +114,25 @@ export async function registerRoutes(httpServer, app) {
   app.post("/api/admin/uploads/images", requireAuth, requireAdmin, upload.array("images", 8), async (req, res) => {
     try {
       if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ message: "No files uploaded" });
+        return res.status(400).json({ error: "No files uploaded" });
       }
-      
+
+      for (const file of req.files) {
+        const extension = path.extname(file.originalname || "").toLowerCase();
+        const expectedMime = allowedImageMimes[extension];
+        const fileBuffer = fs.readFileSync(file.path);
+        const detectedMime = detectImageSignature(fileBuffer);
+
+        if (!expectedMime || !detectedMime || detectedMime !== expectedMime) {
+          fs.unlinkSync(file.path);
+          return res.status(400).json({ error: "Invalid image file content" });
+        }
+      }
+
       const urls = req.files.map(file => `/uploads/products/${file.filename}`);
       res.json(urls);
-    } catch (error) {
-      res.status(500).json({ message: "Upload failed" });
+    } catch (_error) {
+      res.status(500).json({ error: "Upload failed" });
     }
   });
 
@@ -155,20 +221,28 @@ export async function registerRoutes(httpServer, app) {
   app.delete("/api/products/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       const existingProduct = await storage.getProduct(id);
       if (!existingProduct) {
         return res.status(404).json({ error: "Product not found" });
       }
 
       const deleted = await storage.deleteProduct(id);
-      if (deleted) {
-        res.json({ success: true, message: "Product deactivated successfully" });
-      } else {
-        res.status(500).json({ message: "Failed to delete product" });
+      if (!deleted) {
+        return res.status(500).json({ error: "Failed to delete product" });
       }
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete product" });
+
+      const imagePaths = collectProductImagePaths(existingProduct);
+      for (const imagePath of imagePaths) {
+        if (!isUploadPathSafe(imagePath)) continue;
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+        }
+      }
+
+      res.json({ success: true, message: "Product deactivated successfully" });
+    } catch (_error) {
+      res.status(500).json({ error: "Failed to delete product" });
     }
   });
 

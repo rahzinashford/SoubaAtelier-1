@@ -19,6 +19,19 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
+
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (payload) => {
+    if (req.path.startsWith("/api") && res.statusCode >= 400) {
+      const message = payload?.error || payload?.message || "Request failed";
+      return originalJson({ error: String(message) });
+    }
+    return originalJson(payload);
+  };
+  next();
+});
+
 function log(message, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -61,8 +74,13 @@ app.use((req, res, next) => {
 
   app.use((err, _req, res, _next) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
+    console.error("Unhandled API error", err);
+
+    if (status >= 500) {
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    return res.status(status).json({ error: err.publicMessage || "Request failed" });
   });
 
   if (process.env.NODE_ENV === "production") {
