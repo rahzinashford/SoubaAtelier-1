@@ -163,7 +163,7 @@ export async function registerRoutes(httpServer, app) {
 
       const deleted = await storage.deleteProduct(id);
       if (deleted) {
-        res.json({ success: true, message: "Product deleted successfully" });
+        res.json({ success: true, message: "Product deactivated successfully" });
       } else {
         res.status(500).json({ message: "Failed to delete product" });
       }
@@ -405,15 +405,7 @@ export async function registerRoutes(httpServer, app) {
     try {
       const userId = req.user.id;
       const orders = await storage.getOrdersByUserId(userId);
-
-      const ordersWithItems = await Promise.all(
-        orders.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
-
-      res.json(ordersWithItems);
+      res.json(orders);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch orders" });
     }
@@ -445,22 +437,17 @@ export async function registerRoutes(httpServer, app) {
   app.get("/api/admin/orders", requireAuth, requireAdmin, async (req, res) => {
     try {
       const ordersWithUsers = await storage.getAllOrders();
-      
-      const ordersWithItems = await Promise.all(
-        ordersWithUsers.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return {
-            id: order.id,
-            userId: order.userId,
-            userName: order.user?.name || "Guest",
-            userEmail: order.user?.email || "N/A",
-            totalAmount: order.totalAmount,
-            status: order.status,
-            createdAt: order.createdAt,
-            itemCount: items.length,
-          };
-        })
-      );
+
+      const ordersWithItems = ordersWithUsers.map((order) => ({
+        id: order.id,
+        userId: order.userId,
+        userName: order.user?.name || "Guest",
+        userEmail: order.user?.email || "N/A",
+        totalAmount: order.totalAmount,
+        status: order.status,
+        createdAt: order.createdAt,
+        itemCount: order.items.length,
+      }));
 
       res.json(ordersWithItems);
     } catch (error) {
@@ -773,15 +760,7 @@ export async function registerRoutes(httpServer, app) {
     try {
       const userId = req.user.id;
       const orders = await storage.getOrdersByUserId(userId);
-
-      const ordersWithItems = await Promise.all(
-        orders.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
-
-      res.json(ordersWithItems);
+      res.json(orders);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch orders" });
     }

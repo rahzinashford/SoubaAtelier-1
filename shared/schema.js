@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, decimal, integer, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, decimal, integer, timestamp, boolean, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -41,18 +41,24 @@ export const carts = pgTable("carts", {
   sessionId: text("sessionId"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIdx: index("carts_user_id_idx").on(table.userId),
+}));
 
 export const cartItems = pgTable("cart_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   cartId: varchar("cartId").notNull().references(() => carts.id, { onDelete: "cascade" }),
   productId: varchar("productId").notNull().references(() => products.id),
   quantity: integer("quantity").notNull().default(1),
-});
+}, (table) => ({
+  cartIdIdx: index("cart_items_cart_id_idx").on(table.cartId),
+  productIdIdx: index("cart_items_product_id_idx").on(table.productId),
+  cartProductUnique: uniqueIndex("cart_items_cart_id_product_id_uidx").on(table.cartId, table.productId),
+}));
 
 export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("userId").references(() => users.id),
+  userId: varchar("userId").notNull().references(() => users.id),
   totalAmount: decimal("totalAmount", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }),
   deliveryCharge: decimal("deliveryCharge", { precision: 10, scale: 2 }),
@@ -71,7 +77,9 @@ export const orders = pgTable("orders", {
   shippingState: text("shippingState").notNull(),
   shippingPinCode: text("shippingPinCode").notNull(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIdx: index("orders_user_id_idx").on(table.userId),
+}));
 
 export const orderItems = pgTable("order_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -79,7 +87,10 @@ export const orderItems = pgTable("order_items", {
   productId: varchar("productId").notNull().references(() => products.id),
   quantity: integer("quantity").notNull(),
   priceAtPurchase: decimal("priceAtPurchase", { precision: 10, scale: 2 }).notNull(),
-});
+}, (table) => ({
+  orderIdIdx: index("order_items_order_id_idx").on(table.orderId),
+  productIdIdx: index("order_items_product_id_idx").on(table.productId),
+}));
 
 export const addresses = pgTable("addresses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -92,14 +103,20 @@ export const addresses = pgTable("addresses", {
   pinCode: text("pinCode").notNull(),
   isDefault: boolean("isDefault").notNull().default(false),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIdx: index("addresses_user_id_idx").on(table.userId),
+}));
 
 export const wishlistItems = pgTable("wishlist_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   productId: varchar("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIdx: index("wishlist_items_user_id_idx").on(table.userId),
+  productIdIdx: index("wishlist_items_product_id_idx").on(table.productId),
+  userProductUnique: uniqueIndex("wishlist_items_user_id_product_id_uidx").on(table.userId, table.productId),
+}));
 
 export const auditLogs = pgTable("audit_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

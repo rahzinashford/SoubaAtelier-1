@@ -108,8 +108,13 @@ export class DatabaseStorage {
   }
 
   async deleteProduct(id) {
-    const result = await db.delete(products).where(eq(products.id, id)).returning();
-    return result.length > 0;
+    const [product] = await db
+      .update(products)
+      .set({ active: false })
+      .where(eq(products.id, id))
+      .returning();
+
+    return Boolean(product);
   }
 
   async getCart(id) {
@@ -189,12 +194,44 @@ export class DatabaseStorage {
     return orderItem;
   }
 
-  async getOrdersByUserId(userId) {
-    return await db.select().from(orders).where(eq(orders.userId, userId)).orderBy(desc(orders.createdAt));
+  mapOrdersWithItems(rows) {
+    const grouped = new Map();
+
+    for (const row of rows) {
+      const orderId = row.order.id;
+      if (!grouped.has(orderId)) {
+        grouped.set(orderId, {
+          ...row.order,
+          user: row.user?.id ? row.user : undefined,
+          items: [],
+        });
+      }
+
+      if (row.item?.id) {
+        grouped.get(orderId).items.push({
+          ...row.item,
+          product: row.product,
+        });
+      }
+    }
+
+    return Array.from(grouped.values());
   }
 
-  async getOrdersBySessionId(sessionId) {
-    return await db.select().from(orders).where(eq(orders.sessionId, sessionId)).orderBy(desc(orders.createdAt));
+  async getOrdersByUserId(userId) {
+    const rows = await db
+      .select({
+        order: orders,
+        item: orderItems,
+        product: products,
+      })
+      .from(orders)
+      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .leftJoin(products, eq(orderItems.productId, products.id))
+      .where(eq(orders.userId, userId))
+      .orderBy(desc(orders.createdAt));
+
+    return this.mapOrdersWithItems(rows);
   }
 
   async getOrder(id) {
@@ -208,15 +245,15 @@ export class DatabaseStorage {
       .from(orderItems)
       .innerJoin(products, eq(orderItems.productId, products.id))
       .where(eq(orderItems.orderId, orderId));
-    
+
     return items.map(item => ({
       ...item.order_items,
-      product: item.products
+      product: item.products,
     }));
   }
 
   async getAllOrders() {
-    const allOrders = await db
+    const rows = await db
       .select({
         order: orders,
         user: {
@@ -224,15 +261,16 @@ export class DatabaseStorage {
           name: users.name,
           email: users.email,
         },
+        item: orderItems,
+        product: products,
       })
       .from(orders)
       .leftJoin(users, eq(orders.userId, users.id))
+      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .leftJoin(products, eq(orderItems.productId, products.id))
       .orderBy(desc(orders.createdAt));
 
-    return allOrders.map(row => ({
-      ...row.order,
-      user: row.user || undefined,
-    }));
+    return this.mapOrdersWithItems(rows);
   }
 
   async updateOrderStatus(id, status) {
