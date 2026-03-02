@@ -8,6 +8,10 @@ import { authLimiter, adminLimiter, checkoutLimiter, contactLimiter } from "./mi
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { randomUUID } from "crypto";
+import { db } from "./db.js";
+import { cartItems, carts, orderItems, orders, products } from "../shared/schema.js";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 const uploadDir = path.join(process.cwd(), "uploads", "products");
 if (!fs.existsSync(uploadDir)) {
@@ -244,58 +248,156 @@ export async function registerRoutes(httpServer, app) {
   app.post("/api/orders", requireAuth, checkoutLimiter, async (req, res) => {
     try {
       const userId = req.user.id;
-      const { items, shipping, deliveryMethod, paymentMethod, promoCode, deliveryCharge, discount } = req.body;
+      const { shipping, deliveryMethod, paymentMethod, promoCode, deliveryCharge, discount } = req.body;
 
       if (!shipping || !shipping.name || !shipping.phone || !shipping.address || !shipping.city || !shipping.state || !shipping.pinCode) {
-        return res.status(400).json({ message: "Shipping information is required" });
+        return res.status(400).json({ error: "Shipping information is required" });
       }
 
-      const subtotal = items.reduce((sum, item) => {
-        return sum + parseFloat(item.product.price) * item.quantity;
-      }, 0);
+      const result = await db.transaction(async (tx) => {
+        const [cart] = await tx.select().from(carts).where(eq(carts.userId, userId)).limit(1);
+        if (!cart) {
+          const err = new Error("Cart is empty");
+          err.status = 400;
+          throw err;
+        }
 
-      const deliveryChargeAmount = parseFloat(deliveryCharge) || 0;
-      const discountAmount = parseFloat(discount) || 0;
-      const totalAmount = subtotal - discountAmount + deliveryChargeAmount;
+        const lockedCartRows = await tx.execute(sql`
+          SELECT
+            ci.id,
+            ci."productId",
+            ci.quantity,
+            p.name,
+            p.price,
+            p.stock
+          FROM cart_items ci
+          INNER JOIN products p ON p.id = ci."productId"
+          WHERE ci."cartId" = ${cart.id}
+          FOR UPDATE OF ci, p
+        `);
 
-      const order = await storage.createOrder({
-        userId,
-        totalAmount: totalAmount.toFixed(2),
-        subtotal: subtotal.toFixed(2),
-        deliveryCharge: deliveryChargeAmount.toFixed(2),
-        discount: discountAmount.toFixed(2),
-        promoCode: promoCode || null,
-        deliveryMethod: deliveryMethod || 'standard',
-        paymentMethod: paymentMethod || 'cod',
-        status: "PENDING",
-        paymentStatus: paymentMethod === 'cod' ? "PENDING" : "PENDING",
-        shippingName: shipping.name,
-        shippingPhone: shipping.phone,
-        shippingAddress: shipping.address,
-        shippingCity: shipping.city,
-        shippingState: shipping.state,
-        shippingPinCode: shipping.pinCode
+        const cartRows = lockedCartRows.rows || [];
+        if (cartRows.length === 0) {
+          const err = new Error("Cart is empty");
+          err.status = 400;
+          throw err;
+        }
+
+        const mergedByProduct = new Map();
+        for (const row of cartRows) {
+          const productId = row.productId;
+          const quantity = Number(row.quantity || 0);
+          if (quantity <= 0) {
+            const err = new Error(`Invalid quantity for product ${row.name}`);
+            err.status = 400;
+            throw err;
+          }
+          const existing = mergedByProduct.get(productId);
+          if (existing) {
+            existing.quantity += quantity;
+          } else {
+            mergedByProduct.set(productId, {
+              productId,
+              name: row.name,
+              price: Number(row.price),
+              stock: Number(row.stock),
+              quantity,
+            });
+          }
+        }
+
+        const mergedItems = Array.from(mergedByProduct.values());
+        const cartProductIds = mergedItems.map(item => item.productId);
+
+        const existingProducts = await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(inArray(products.id, cartProductIds));
+
+        const existingSet = new Set(existingProducts.map(p => p.id));
+        for (const item of mergedItems) {
+          if (!existingSet.has(item.productId)) {
+            const err = new Error(`Product deleted for product ${item.name}`);
+            err.status = 400;
+            throw err;
+          }
+          if (item.stock < item.quantity) {
+            const err = new Error(`Insufficient stock for product ${item.name}`);
+            err.status = 400;
+            throw err;
+          }
+        }
+
+        const subtotal = mergedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const deliveryChargeAmount = parseFloat(deliveryCharge) || 0;
+        const discountAmount = parseFloat(discount) || 0;
+        const totalAmount = subtotal - discountAmount + deliveryChargeAmount;
+
+        const [createdOrder] = await tx.insert(orders).values({
+          id: randomUUID(),
+          userId,
+          totalAmount: totalAmount.toFixed(2),
+          subtotal: subtotal.toFixed(2),
+          deliveryCharge: deliveryChargeAmount.toFixed(2),
+          discount: discountAmount.toFixed(2),
+          promoCode: promoCode || null,
+          deliveryMethod: deliveryMethod || 'standard',
+          paymentMethod: paymentMethod || 'cod',
+          status: "PENDING",
+          paymentStatus: "PENDING",
+          shippingName: shipping.name,
+          shippingPhone: shipping.phone,
+          shippingAddress: shipping.address,
+          shippingCity: shipping.city,
+          shippingState: shipping.state,
+          shippingPinCode: shipping.pinCode
+        }).returning();
+
+        const insertedOrderItems = [];
+        for (const item of mergedItems) {
+          const [updatedProduct] = await tx
+            .update(products)
+            .set({ stock: sql`${products.stock} - ${item.quantity}` })
+            .where(and(eq(products.id, item.productId), sql`${products.stock} >= ${item.quantity}`))
+            .returning({ id: products.id });
+
+          if (!updatedProduct) {
+            const err = new Error(`Insufficient stock for product ${item.name}`);
+            err.status = 400;
+            throw err;
+          }
+
+          const [createdOrderItem] = await tx.insert(orderItems).values({
+            id: randomUUID(),
+            orderId: createdOrder.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            priceAtPurchase: item.price.toFixed(2),
+          }).returning();
+
+          insertedOrderItems.push({
+            ...createdOrderItem,
+            product: {
+              id: item.productId,
+              name: item.name,
+            },
+          });
+        }
+
+        await tx.delete(cartItems).where(eq(cartItems.cartId, cart.id));
+
+        return { order: createdOrder, items: insertedOrderItems };
       });
 
-      for (const item of items) {
-        await storage.createOrderItem({
-          orderId: order.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          priceAtPurchase: item.product.price
-        });
-      }
-
-      const cart = await storage.getCartByUserId(userId);
-      if (cart) {
-        await storage.clearCart(cart.id);
-      }
-
-      const orderItems = await storage.getOrderItems(order.id);
-      
-      res.status(201).json({ order, items: orderItems });
+      res.status(201).json(result);
     } catch (error) {
-      res.status(500).json({ message: "Failed to create order" });
+      console.error("Checkout transaction failed:", error);
+
+      if (error?.status === 400) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      res.status(500).json({ error: "Failed to create order" });
     }
   });
 
