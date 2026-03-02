@@ -28,6 +28,10 @@ export async function requireAuth(req, res, next) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    if (!user.active) {
+      return res.status(403).json({ error: "Account disabled" });
+    }
+
     if (decoded.tokenVersion !== user.tokenVersion) {
       return res.status(401).json({ error: "Session invalidated" });
     }
