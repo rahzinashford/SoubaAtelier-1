@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { safeStorage } from '@/lib/safeStorage';
+import { getErrorMessage, parseJsonSafely } from '@/lib/apiError';
 
 const AuthContext = createContext(null);
 
@@ -59,11 +60,11 @@ export const AuthProvider = ({ children }) => {
         },
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch user');
-      }
+      const userData = await parseJsonSafely(response);
 
-      const userData = await response.json();
+      if (!response.ok) {
+        throw new Error(getErrorMessage(userData, 'Failed to fetch user'));
+      }
       setUser(userData);
       return userData;
     } catch (error) {
@@ -101,12 +102,11 @@ export const AuthProvider = ({ children }) => {
       body: JSON.stringify({ email, password }),
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Login failed' }));
-      throw new Error(error.message || 'Login failed');
-    }
+    const data = await parseJsonSafely(response);
 
-    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, 'Login failed'));
+    }
     saveToken(data.token);
     setUser(data.user);
     return data.user;
@@ -121,12 +121,13 @@ export const AuthProvider = ({ children }) => {
       body: JSON.stringify(data),
     });
 
+    const payload = await parseJsonSafely(response);
+
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Registration failed' }));
-      throw new Error(error.message || 'Registration failed');
+      throw new Error(getErrorMessage(payload, 'Registration failed'));
     }
 
-    return await response.json();
+    return payload;
   }, []);
 
   const refreshUser = useCallback(async () => {

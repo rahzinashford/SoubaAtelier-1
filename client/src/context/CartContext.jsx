@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { getErrorMessage, parseJsonSafely } from '@/lib/apiError';
 
 const CartContext = createContext(null);
 
@@ -41,13 +42,13 @@ export const CartProvider = ({ children }) => {
         headers: getHeaders(),
       });
 
+      const data = await parseJsonSafely(response);
+
       if (!response.ok) {
-        throw new Error('Failed to fetch cart');
+        throw new Error(getErrorMessage(data, 'Failed to fetch cart'));
       }
 
-      const data = await response.json();
-      
-      const items = (data.items || []).map(item => ({
+      const items = ((data?.items) || []).map(item => ({
         id: item.id,
         productId: item.productId,
         code: item.product?.code || '',
@@ -101,8 +102,8 @@ export const CartProvider = ({ children }) => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Failed to add item to cart');
+        const errorData = await parseJsonSafely(response);
+        throw new Error(getErrorMessage(errorData, 'Failed to add item to cart'));
       }
 
       await fetchCart();
@@ -136,7 +137,8 @@ export const CartProvider = ({ children }) => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update quantity');
+        const errorData = await parseJsonSafely(response);
+        throw new Error(getErrorMessage(errorData, 'Failed to update quantity'));
       }
 
       await fetchCart();
@@ -163,7 +165,8 @@ export const CartProvider = ({ children }) => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to remove item');
+        const errorData = await parseJsonSafely(response);
+        throw new Error(getErrorMessage(errorData, 'Failed to remove item'));
       }
 
       await fetchCart();
