@@ -10,6 +10,7 @@ import { securityHeaders } from "./middlewares/securityHeaders.js";
 
 const app = express();
 const httpServer = createServer(app);
+const isProduction = process.env.NODE_ENV === "production";
 
 app.use(securityHeaders);
 app.use("/api", globalLimiter);
@@ -18,7 +19,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
-
 
 app.use((req, res, next) => {
   const originalJson = res.json.bind(res);
@@ -33,34 +33,41 @@ app.use((req, res, next) => {
 });
 
 function log(message, source = "express") {
+  if (isProduction) return;
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
     hour12: true,
   });
-  console.log(`${formattedTime} [${source}] ${message}`);
+  process.stdout.write(`${formattedTime} [${source}] ${message}\n`);
+}
+
+function logError(message, error, metadata = {}) {
+  if (isProduction) {
+    console.error(message, {
+      name: error?.name,
+      message: error?.message,
+      ...metadata,
+    });
+    return;
+  }
+
+  console.error(message, error);
 }
 
 app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse = undefined;
+  if (isProduction) {
+    return next();
+  }
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.call(res, bodyJson);
-  };
+  const start = Date.now();
+  const requestPath = req.path;
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse).substring(0, 200)}`;
-      }
-      log(logLine);
+    if (requestPath.startsWith("/api")) {
+      log(`${req.method} ${requestPath} ${res.statusCode} in ${duration}ms`);
     }
   });
 
@@ -74,7 +81,7 @@ app.use((req, res, next) => {
 
   app.use((err, _req, res, _next) => {
     const status = err.status || err.statusCode || 500;
-    console.error("Unhandled API error", err);
+    logError("Unhandled API error", err, { status });
 
     if (status >= 500) {
       return res.status(500).json({ error: "Internal server error" });
@@ -83,14 +90,14 @@ app.use((req, res, next) => {
     return res.status(status).json({ error: err.publicMessage || "Request failed" });
   });
 
-  if (process.env.NODE_ENV === "production") {
+  if (isProduction) {
     serveStatic(app);
   } else {
     await setupVite(httpServer, app);
   }
 
   const port = parseInt(process.env.PORT || "5000", 10);
- httpServer.listen(port, () => {
-  log(`serving on http://localhost:${port}`);
-}); 
+  httpServer.listen(port, () => {
+    log(`serving on http://localhost:${port}`);
+  });
 })();

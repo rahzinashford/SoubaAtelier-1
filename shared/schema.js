@@ -308,6 +308,91 @@ export const updateUserActiveSchema = z.object({
   active: z.boolean(),
 });
 
+
+export const loginSchema = z.object({
+  email: z.string().email("Valid email is required"),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const addToCartSchema = z.object({
+  productId: z.string().min(1, "Product ID is required"),
+  quantity: z.number().int().positive("Quantity must be at least 1"),
+});
+
+export const updateCartItemQuantitySchema = z.object({
+  quantity: z.number().int().min(0, "Quantity must be 0 or greater"),
+});
+
+export const createOrderSchema = z.object({
+  shipping: z.object({
+    name: z.string().min(1),
+    phone: z.string().min(1),
+    address: z.string().min(1),
+    city: z.string().min(1),
+    state: z.string().min(1),
+    pinCode: z.string().min(1),
+  }),
+  deliveryMethod: z.string().optional(),
+  paymentMethod: z.string().optional(),
+  promoCode: z.string().optional(),
+  deliveryCharge: z.union([z.number(), z.string()]).optional(),
+  discount: z.union([z.number(), z.string()]).optional(),
+});
+
+export const adminBulkProductsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1, "No products selected"),
+  action: z.enum(["activate", "deactivate", "adjustStock"]),
+  data: z.object({
+    adjustment: z.number(),
+  }).optional(),
+}).superRefine((value, ctx) => {
+  if (value.action === "adjustStock" && typeof value.data?.adjustment !== "number") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["data", "adjustment"],
+      message: "Adjustment is required for adjustStock action",
+    });
+  }
+});
+
+export const adminImportProductsSchema = z.object({
+  products: z.array(z.object({
+    code: z.string().min(1, "Product code is required"),
+    name: z.string().optional(),
+    price: z.union([z.string(), z.number()]).optional(),
+    category: z.string().optional(),
+    imageUrl: z.string().optional(),
+    images: z.array(z.string()).optional(),
+    variants: z.array(productVariantSchema).optional(),
+    description: z.string().optional(),
+    stock: z.number().int().min(0).optional(),
+    active: z.boolean().optional(),
+  })).min(1, "At least one product is required"),
+});
+
+export const adjustStockSchema = z.object({
+  adjustment: z.number(),
+});
+
+export const adminOrderNoteCreateSchema = z.object({
+  note: z.string().min(1, "Note is required"),
+});
+
+export const adminSettingUpdateSchema = z.object({
+  key: z.enum(["freeShippingThreshold", "lowStockThreshold", "maintenanceMode", "currency"]),
+  value: z.union([z.string(), z.number(), z.boolean()]),
+}).superRefine((value, ctx) => {
+  if (value.key === "currency" && !["INR", "USD", "AED"].includes(String(value.value))) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["value"],
+      message: "Invalid currency. Allowed: INR, USD, AED",
+    });
+  }
+});
+
+export const revokeSessionsSchema = z.object({}).strict();
+
 export const adminProductsQuerySchema = z.object({
   page: z.string().optional().transform(val => parseInt(val || '1')),
   pageSize: z.string().optional().transform(val => parseInt(val || '20')),

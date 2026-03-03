@@ -5,6 +5,7 @@ import { db } from "./db.js";
 import { eq, and, desc, asc, ilike, or, gte, lte, sql, count, sum } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "crypto";
+import { logError } from "./utils/logger.js";
 
 export class DatabaseStorage {
   async getUser(id) {
@@ -137,7 +138,7 @@ export class DatabaseStorage {
         price: Number(product.price)
       };
     } catch (error) {
-      console.error("Database error creating product:", error);
+      logError("Database error creating product", error);
       throw error;
     }
   }
