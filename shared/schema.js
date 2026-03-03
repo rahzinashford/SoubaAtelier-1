@@ -79,6 +79,7 @@ export const orders = pgTable("orders", {
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 }, (table) => ({
   userIdIdx: index("orders_user_id_idx").on(table.userId),
+  createdAtIdx: index("orders_created_at_idx").on(table.createdAt),
 }));
 
 export const orderItems = pgTable("order_items", {

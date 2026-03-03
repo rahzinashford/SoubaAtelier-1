@@ -49,7 +49,7 @@ export class DatabaseStorage {
   }
 
   async getAllProducts() {
-  const rows = await db.select().from(products);
+  const rows = await db.select().from(products).where(eq(products.active, true));
   return rows.map(p => ({
     ...p,
     price: Number(p.price)
@@ -69,6 +69,20 @@ export class DatabaseStorage {
 
 
   async getProductByCode(code) {
+  const [product] = await db
+    .select()
+    .from(products)
+    .where(and(eq(products.code, code), eq(products.active, true)));
+  if (!product) return undefined;
+
+  return {
+    ...product,
+    price: Number(product.price)
+  };
+}
+
+
+  async getProductByCodeIncludingInactive(code) {
   const [product] = await db.select().from(products).where(eq(products.code, code));
   if (!product) return undefined;
 
@@ -80,12 +94,33 @@ export class DatabaseStorage {
 
 
   async getProductsByCategory(category) {
-  const rows = await db.select().from(products).where(eq(products.category, category));
+  const rows = await db
+    .select()
+    .from(products)
+    .where(and(eq(products.category, category), eq(products.active, true)));
   return rows.map(p => ({
     ...p,
     price: Number(p.price)
   }));
 }
+
+  async searchProducts(query) {
+    const searchPattern = `%${query}%`;
+    const rows = await db
+      .select()
+      .from(products)
+      .where(
+        and(
+          eq(products.active, true),
+          or(ilike(products.name, searchPattern), ilike(products.code, searchPattern))
+        )
+      );
+
+    return rows.map(p => ({
+      ...p,
+      price: Number(p.price),
+    }));
+  }
 
 
   async createProduct(insertProduct) {
@@ -659,7 +694,7 @@ async clearPasswordResetToken(userId) {
     
     for (const prod of productsData) {
       try {
-        const existing = await this.getProductByCode(prod.code);
+        const existing = await this.getProductByCodeIncludingInactive(prod.code);
         if (existing) {
           await this.updateProduct(existing.id, prod);
           results.updated++;
@@ -903,4 +938,3 @@ async clearPasswordResetToken(userId) {
 
 
 export const storage = new DatabaseStorage();
-

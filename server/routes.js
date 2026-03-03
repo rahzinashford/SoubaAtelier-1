@@ -297,6 +297,24 @@ export async function registerRoutes(httpServer, app) {
       const { id } = req.params;
       const { quantity } = req.body;
 
+      const [itemWithCart] = await db
+        .select({
+          itemId: cartItems.id,
+          cartUserId: carts.userId,
+        })
+        .from(cartItems)
+        .innerJoin(carts, eq(cartItems.cartId, carts.id))
+        .where(eq(cartItems.id, id))
+        .limit(1);
+
+      if (!itemWithCart) {
+        return res.status(404).json({ error: "Cart item not found" });
+      }
+
+      if (itemWithCart.cartUserId !== req.user.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       if (quantity <= 0) {
         await storage.removeCartItem(id);
       } else {
@@ -312,6 +330,25 @@ export async function registerRoutes(httpServer, app) {
   app.delete("/api/cart/item/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
+
+      const [itemWithCart] = await db
+        .select({
+          itemId: cartItems.id,
+          cartUserId: carts.userId,
+        })
+        .from(cartItems)
+        .innerJoin(carts, eq(cartItems.cartId, carts.id))
+        .where(eq(cartItems.id, id))
+        .limit(1);
+
+      if (!itemWithCart) {
+        return res.status(404).json({ error: "Cart item not found" });
+      }
+
+      if (itemWithCart.cartUserId !== req.user.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       await storage.removeCartItem(id);
       res.json({ success: true });
     } catch (error) {
