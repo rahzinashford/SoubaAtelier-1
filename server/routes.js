@@ -244,8 +244,12 @@ export async function registerRoutes(httpServer, app) {
       const imagePaths = collectProductImagePaths(existingProduct);
       for (const imagePath of imagePaths) {
         if (!isUploadPathSafe(imagePath)) continue;
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
+        try {
+          await fs.promises.unlink(imagePath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") {
+            console.error("Failed to clean up product image", { imagePath, error });
+          }
         }
       }
 
