@@ -33,7 +33,9 @@ export const products = pgTable("products", {
   stock: integer("stock").notNull().default(100),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
-});
+}, (table) => ({
+  activeIdx: index("products_active_idx").on(table.active),
+}));
 
 export const carts = pgTable("carts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -80,6 +82,7 @@ export const orders = pgTable("orders", {
 }, (table) => ({
   userIdIdx: index("orders_user_id_idx").on(table.userId),
   createdAtIdx: index("orders_created_at_idx").on(table.createdAt),
+  statusIdx: index("orders_status_idx").on(table.status),
 }));
 
 export const orderItems = pgTable("order_items", {

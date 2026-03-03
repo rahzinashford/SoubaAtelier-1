@@ -240,7 +240,7 @@ const ProfilePage = () => {
                 onRefresh={fetchWishlist}
                 onAddToCart={async (product) => {
                   try {
-                    await addItem(product.id, 1);
+                    await addItem(product, 1);
                     success('Added to cart');
                   } catch (err) {
                     error('Failed to add to cart');

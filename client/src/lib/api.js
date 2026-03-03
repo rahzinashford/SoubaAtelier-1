@@ -1,4 +1,5 @@
 import { safeStorage } from './safeStorage';
+import { getErrorMessage, parseJsonSafely } from './apiError';
 
 const API_BASE = '/api';
 
@@ -34,12 +35,13 @@ async function fetchAPI(endpoint, options) {
     headers,
   });
 
+  const data = await parseJsonSafely(response);
+
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || 'Request failed');
+    throw new Error(getErrorMessage(data));
   }
 
-  return response.json();
+  return data;
 }
 
 async function fetchAPIAuth(endpoint, options) {
