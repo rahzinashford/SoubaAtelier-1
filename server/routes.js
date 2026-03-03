@@ -524,6 +524,10 @@ export async function registerRoutes(httpServer, app) {
         return res.status(400).json({ message: "Invalid order payload", errors: error.errors });
       }
 
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid order payload", errors: error.errors });
+      }
+
       if (error?.status === 400) {
         return res.status(400).json({ error: error.message });
       }
